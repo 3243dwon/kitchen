@@ -57,9 +57,24 @@ check() {  # $1 repo, $2 check, $3 network(0/1) -> prints ok|MISSING|skip|unknow
       git -C "$r" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1 ||
         git -C "$r" ls-files --error-unmatch AGENTS.md >/dev/null 2>&1 && echo ok || echo none ;;
     pr-ci)
-      # block form (`  pull_request:`) or flow form (`on: [push, pull_request]`)
-      grep -lqE '^[[:space:]]*pull_request(_target)?[[:space:]]*:|^on:.*[[ ,]pull_request(_target)?[] ,]' \
-        "$r"/.github/workflows/*.y*ml 2>/dev/null && echo ok || echo MISSING ;;
+      # Read the default branch as last fetched, not the working tree: a checkout sitting
+      # on a feature branch says nothing about what guards main. No remote: the tree.
+      # Matches the block form (`  pull_request:`) and the flow form (`on: [push, pull_request]`).
+      local ref pat='^[[:space:]]*pull_request(_target)?[[:space:]]*:|^on:.*[[ ,]pull_request(_target)?[] ,]'
+      ref=$(git -C "$r" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+      for b in origin/main origin/master; do
+        [ -n "$ref" ] && break
+        git -C "$r" rev-parse -q --verify "$b" >/dev/null && ref=$b
+      done
+      if [ -n "$ref" ]; then
+        # read it all, then match: `… | grep -q` under pipefail fails on the writer's SIGPIPE
+        local wf
+        wf=$(git -C "$r" ls-tree --name-only "$ref" .github/workflows/ 2>/dev/null | grep -E '\.ya?ml$' |
+          while read -r f; do git -C "$r" show "$ref:$f"; done)
+        grep -qE "$pat" <<<"$wf" && echo ok || echo MISSING
+      else
+        grep -lqE "$pat" "$r"/.github/workflows/*.y*ml 2>/dev/null && echo ok || echo MISSING
+      fi ;;
     required)
       local s ans; s=$(slug "$r")
       if [ "$3" = 1 ] && [ -n "$s" ]; then ans=$(required_live "$s"); else ans=$(required_cached "$s"); fi

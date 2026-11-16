@@ -30,6 +30,20 @@ say "$(col "$R" rules)" none "rules: untracked CLAUDE.md"
 git -C "$R" add -A && git -C "$R" commit -qm i
 say "$(col "$R" rules)" ok "rules: tracked CLAUDE.md"
 
+# what guards main is main as fetched, not whatever branch the checkout sits on
+git init -q --bare "$T/origin.git"; mk clone; C="$T/clone"
+mkdir -p "$C/.github/workflows"; printf 'on:\n  pull_request:\n' > "$C/.github/workflows/a-check.yml"
+# big workflows after the match: the old `| grep -q` under pipefail died of SIGPIPE here
+for i in 1 2 3; do { echo 'on: [push]'; for n in $(seq 4000); do echo "# filler line $n of a long workflow file"; done; } > "$C/.github/workflows/z$i.yml"; done
+git -C "$C" add -A && git -C "$C" commit -qm ci && git -C "$C" branch -qM main
+git -C "$C" remote add origin "$T/origin.git" && git -C "$C" push -q origin main 2>/dev/null && git -C "$C" fetch -q origin
+git -C "$C" switch -qc feature && git -C "$C" rm -q .github/workflows/a-check.yml && git -C "$C" commit -qm drop
+say "$(col "$C" pr-ci)" ok "pr-ci: main has it, the checked-out branch does not"
+git -C "$C" switch -q main && printf 'on:\n  push:\n' > "$C/.github/workflows/a-check.yml"
+git -C "$C" commit -qam push-only && git -C "$C" push -q origin main 2>/dev/null && git -C "$C" fetch -q origin
+git -C "$C" switch -qc feature2 && printf 'on:\n  pull_request:\n' > "$C/.github/workflows/a-check.yml"
+say "$(col "$C" pr-ci)" MISSING "pr-ci: a branch has it, main does not"
+
 mk skip; S="$T/skip"; mkdir -p "$S/.claude"
 printf 'pr-ci\n' > "$S/.claude/kitchen-skip"; git -C "$S" add -A && git -C "$S" commit -qm s
 say "$(col "$S" pr-ci)" MISSING "opt-out without a reason does not count"
